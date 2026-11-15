@@ -1,122 +1,307 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getProductById } from '../../api/productApi';
 import { createReservation } from '../../api/reservationApi';
+import { useAuth } from '../../context/AuthContext';
 
 export default function ListingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
+
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reserving, setReserving] = useState(false);
+  const [quantity, setQuantity] = useState('1');
   const [toast, setToast] = useState('');
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
+    setLoading(true);
+    setImageError(false);
+
     getProductById(id)
-      .then((res) => setProduct(res.data?.product || res.data))
+      .then((res) => {
+        setProduct(res.data?.product || res.data);
+      })
+      .catch((err) => {
+        console.error('Product loading error:', err);
+        setProduct(null);
+      })
       .finally(() => setLoading(false));
   }, [id]);
 
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 3000);
+  };
+
   const handleReserve = async () => {
+    if (!user) {
+      navigate('/login', {
+        state: {
+          from: location.pathname
+        }
+      });
+      return;
+    }
+
+    if (user.role !== 'buyer') {
+      showToast('Only buyer accounts can reserve food.');
+      return;
+    }
+
+    const selectedQuantity = Number(quantity);
+    const available = Number(product.availableQuantity) || 0;
+
+    if (
+      !Number.isInteger(selectedQuantity) ||
+      selectedQuantity < 1 ||
+      selectedQuantity > available
+    ) {
+      showToast('Please select a valid quantity.');
+      return;
+    }
+
     setReserving(true);
+
     try {
-      await createReservation({ productId: id });
-      setToast('Reserved! 🎉 Check My Reservations.');
-      setTimeout(() => navigate('/buyer/reservations'), 2500);
+      await createReservation({
+        productId: id,
+        quantity: selectedQuantity
+      });
+
+      showToast('Reservation successful!');
+
+      setTimeout(() => {
+        navigate('/buyer/reservations');
+      }, 1200);
+
     } catch (err) {
-      setToast(err.response?.data?.message || 'Failed to reserve.');
-      setTimeout(() => setToast(''), 3000);
+      showToast(
+        err.response?.data?.message || 'Unable to reserve this food.'
+      );
     } finally {
       setReserving(false);
     }
   };
 
-  if (loading) return (
-    <div className="flex justify-center py-24">
-      <div className="w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
-  if (!product) return (
-    <div className="max-w-2xl mx-auto px-6 py-24 text-center">
-      <div className="text-5xl mb-4">❓</div>
-      <p className="text-slate-500 dark:text-slate-400 font-medium">Listing not found</p>
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#faf8f2] flex justify-center items-center">
+        <p className="text-[#527a49]">Loading food details...</p>
+      </div>
+    );
+  }
 
-  const discount = Math.round((1 - product.discountedPrice / product.originalPrice) * 100);
+  if (!product) {
+    return (
+      <div className="min-h-screen bg-[#faf8f2] text-center py-24">
+        <h2 className="font-display text-3xl">
+          Food listing not found
+        </h2>
+
+        <button
+          onClick={() => navigate('/buyer/browse')}
+          className="mt-5 text-[#527a49]"
+        >
+          Browse available food
+        </button>
+      </div>
+    );
+  }
+
+  const available = Number(product.availableQuantity) || 0;
+  const seller = product.sellerId || product.seller;
+
+  const discount = product.originalPrice > 0
+    ? Math.round(
+        (1 - product.discountedPrice / product.originalPrice) * 100
+      )
+    : 0;
+
+  const emoji = (() => {
+    const name = `${product.name} ${product.category}`.toLowerCase();
+
+    if (name.includes('pizza')) return '🍕';
+    if (name.includes('egg roll') || name.includes('roll')) return '🌯';
+    if (name.includes('sandwich')) return '🥪';
+    if (name.includes('burger')) return '🍔';
+    if (name.includes('cake')) return '🍰';
+    if (name.includes('bread')) return '🍞';
+    if (name.includes('rice') || name.includes('biryani')) return '🍚';
+
+    return '🍽️';
+  })();
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
+    <div className="min-h-screen bg-[#faf8f2] py-12 px-5">
+
       {toast && (
-        <div className="fixed top-4 right-4 z-50 px-5 py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-sm font-medium rounded-xl shadow-xl animate-slide-up">
+        <div className="fixed top-20 right-5 z-50 bg-[#293f28] text-white px-5 py-3 rounded-lg shadow-lg">
           {toast}
         </div>
       )}
 
-      <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400 mb-6 transition-colors">
-        ← Back
-      </button>
+      <div className="max-w-3xl mx-auto">
 
-      <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-lg border border-slate-100 dark:border-gray-700 overflow-hidden">
-        {/* Hero image placeholder */}
-        <div className="h-56 bg-gradient-to-br from-green-100 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/20 flex items-center justify-center text-7xl relative">
-          🥗
-          {discount > 0 && (
-            <span className="absolute top-4 right-4 px-3 py-1 bg-green-500 text-white text-sm font-bold rounded-xl shadow">
-              -{discount}% off
-            </span>
-          )}
-        </div>
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-7 text-sm text-[#527a49]"
+        >
+          ← Back to food
+        </button>
 
-        <div className="p-6 md:p-8 space-y-5">
-          <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-green-600 dark:text-green-400">{product.category}</span>
-            <h1 className="text-2xl font-black text-slate-900 dark:text-white mt-1">{product.name}</h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">{product.description}</p>
+        <div className="bg-[#fffefa] border border-[#e8e6dc] rounded-xl overflow-hidden">
+
+          {/* FOOD PHOTOGRAPH */}
+          <div className="h-72 md:h-96 bg-[#e9eddf] relative overflow-hidden flex items-center justify-center">
+
+            {product.imageUrl && !imageError ? (
+              <img
+                src={product.imageUrl}
+                alt={product.name}
+                className="w-full h-full object-cover"
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <span className="text-8xl">
+                {emoji}
+              </span>
+            )}
+
+            {discount > 0 && (
+              <span className="absolute top-5 left-5 bg-[#3e6339] text-white text-sm px-4 py-2 font-bold shadow">
+                {discount}% OFF
+              </span>
+            )}
+
           </div>
 
-          <div className="flex flex-wrap gap-4 text-sm">
-            <div className="bg-slate-50 dark:bg-gray-700 rounded-xl px-4 py-3">
-              <p className="text-slate-400 text-xs mb-1">Discounted Price</p>
-              <p className="text-2xl font-black text-slate-900 dark:text-white">₹{product.discountedPrice}</p>
+          {/* PRODUCT INFORMATION */}
+          <div className="p-6 md:p-9">
+
+            <p className="text-xs uppercase tracking-widest text-[#648357] font-bold">
+              {product.category}
+            </p>
+
+            <h1 className="font-display text-4xl mt-2">
+              {product.name}
+            </h1>
+
+            <p className="text-[#777d72] mt-3 leading-7">
+              {product.description}
+            </p>
+
+            {/* PRICE */}
+            <div className="flex items-center gap-4 mt-7">
+
+              <span className="text-3xl font-bold text-[#3e6339]">
+                ₹{product.discountedPrice}
+              </span>
+
+              <span className="line-through text-[#999]">
+                ₹{product.originalPrice}
+              </span>
+
             </div>
-            <div className="bg-slate-50 dark:bg-gray-700 rounded-xl px-4 py-3">
-              <p className="text-slate-400 text-xs mb-1">Original Price</p>
-              <p className="text-lg font-semibold text-slate-400 line-through">₹{product.originalPrice}</p>
+
+            <p className="text-sm text-[#777d72] mt-3">
+              {available} portions available
+            </p>
+
+            {/* SELLER */}
+            {seller && (
+              <div className="mt-7 border-t border-[#e8e6dc] pt-5">
+
+                <p className="text-xs uppercase tracking-wider text-[#648357] font-bold">
+                  Sold by
+                </p>
+
+                <p className="font-semibold mt-1">
+                  {seller.businessName || seller.name}
+                </p>
+
+              </div>
+            )}
+
+            {/* PICKUP LOCATION */}
+            {product.pickupAddress && (
+              <div className="mt-5">
+
+                <p className="text-xs uppercase tracking-wider text-[#648357] font-bold">
+                  Pickup location
+                </p>
+
+                <p className="text-sm mt-1">
+                  {product.pickupAddress}
+                </p>
+
+              </div>
+            )}
+
+            {/* DEADLINE */}
+            {product.availabilityDeadline && (
+              <div className="mt-5">
+
+                <p className="text-xs uppercase tracking-wider text-[#648357] font-bold">
+                  Available until
+                </p>
+
+                <p className="text-sm mt-1">
+                  {new Date(product.availabilityDeadline).toLocaleString()}
+                </p>
+
+              </div>
+            )}
+
+            {/* QUANTITY */}
+            <div className="mt-8">
+
+              <label className="block text-sm font-semibold mb-2">
+                Select quantity
+              </label>
+
+              <input
+                type="number"
+                min="1"
+                max={available}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                className="input"
+                disabled={available <= 0}
+              />
+
             </div>
-            <div className="bg-slate-50 dark:bg-gray-700 rounded-xl px-4 py-3">
-              <p className="text-slate-400 text-xs mb-1">Available Qty</p>
-              <p className="text-lg font-bold text-slate-900 dark:text-white">{product.quantity}</p>
-            </div>
+
+            {/* RESERVE BUTTON */}
+            <button
+              onClick={handleReserve}
+              disabled={
+                reserving ||
+                available <= 0 ||
+                Number(quantity) < 1 ||
+                Number(quantity) > available
+              }
+              className="mt-7 w-full bg-[#3e6339] hover:bg-[#293f28] text-white py-4 rounded-md font-semibold disabled:opacity-50"
+            >
+              {reserving
+                ? 'Reserving...'
+                : available <= 0
+                ? 'Sold Out'
+                : user
+                ? 'Reserve This Food'
+                : 'Login to Reserve'}
+            </button>
+
+            {!user && (
+              <p className="text-center text-xs text-[#888] mt-4">
+                Sign in or create a free account to reserve this food.
+              </p>
+            )}
+
           </div>
-
-          {product.pickupWindow && (
-            <div className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300 bg-green-50 dark:bg-green-900/20 p-3 rounded-xl border border-green-100 dark:border-green-800">
-              <span>🕐</span>
-              <span><strong>Pickup window:</strong> {product.pickupWindow}</span>
-            </div>
-          )}
-
-          {product.seller && (
-            <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-700 rounded-xl">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white font-bold">
-                {product.seller.name?.[0]?.toUpperCase()}
-              </div>
-              <div>
-                <p className="font-semibold text-slate-900 dark:text-white text-sm">{product.seller.name}</p>
-                <p className="text-xs text-slate-400">Seller</p>
-              </div>
-            </div>
-          )}
-
-          <button
-            id="details-reserve"
-            onClick={handleReserve}
-            disabled={reserving || product.quantity === 0}
-            className="w-full py-3.5 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:opacity-50 text-white font-bold rounded-2xl shadow-lg shadow-green-500/20 hover:shadow-xl hover:shadow-green-500/30 transition-all active:scale-95 text-base"
-          >
-            {reserving ? 'Reserving…' : product.quantity === 0 ? 'Sold Out' : 'Reserve This Item'}
-          </button>
         </div>
       </div>
     </div>

@@ -2,40 +2,63 @@ const Reservation = require('../models/Reservation');
 const Product = require('../models/Product');
 const mongoose = require('mongoose');
 
+// CREATE RESERVATION
 exports.createReservation = async (req, res) => {
   try {
     const { productId, quantity } = req.body;
+    console.log('Reservation request body:', req.body);
+console.log('Logged-in user:', req.user);
 
     if (!productId || !quantity) {
-      return res.status(400).json({ success: false, message: 'Product and quantity are required.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Product and quantity are required.'
+      });
     }
 
     const qty = Number(quantity);
+
     if (!Number.isInteger(qty) || qty < 1) {
-      return res.status(400).json({ success: false, message: 'Quantity must be a positive whole number.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity must be a positive whole number.'
+      });
     }
 
     const product = await Product.findById(productId);
+
     if (!product) {
-      return res.status(404).json({ success: false, message: 'Listing not found.' });
+      return res.status(404).json({
+        success: false,
+        message: 'Listing not found.'
+      });
     }
 
     if (product.sellerId.toString() === req.user.id.toString()) {
-      return res.status(400).json({ success: false, message: 'You cannot reserve your own listing.' });
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot reserve your own listing.'
+      });
     }
 
     if (product.status !== 'active') {
-      return res.status(400).json({ success: false, message: 'This listing is no longer active.' });
+      return res.status(400).json({
+        success: false,
+        message: 'This listing is no longer active.'
+      });
     }
 
     if (new Date(product.availabilityDeadline) <= new Date()) {
-      return res.status(400).json({ success: false, message: 'This listing has expired.' });
+      return res.status(400).json({
+        success: false,
+        message: 'This listing has expired.'
+      });
     }
 
     if (product.availableQuantity < qty) {
       return res.status(400).json({
         success: false,
-        message: `Only ${product.availableQuantity} unit(s) available. Please reduce your quantity.`,
+        message: `Only ${product.availableQuantity} unit(s) available. Please reduce your quantity.`
       });
     }
 
@@ -49,8 +72,14 @@ exports.createReservation = async (req, res) => {
     });
 
     await reservation.populate([
-      { path: 'productId', select: 'name category pickupAddress discountedPrice' },
-      { path: 'sellerId', select: 'name businessName' },
+      {
+        path: 'productId',
+        select: 'name category pickupAddress originalPrice discountedPrice'
+      },
+      {
+        path: 'sellerId',
+        select: 'name businessName'
+      },
     ]);
 
     res.status(201).json({
@@ -58,44 +87,82 @@ exports.createReservation = async (req, res) => {
       message: 'Reservation request submitted. Waiting for seller confirmation.',
       reservation,
     });
+
   } catch (err) {
     console.error('Create reservation error:', err);
-    res.status(500).json({ success: false, message: 'Server error. Please try again.' });
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error. Please try again.'
+    });
   }
 };
 
+
+// GET BUYER RESERVATIONS
 exports.getReservationsByBuyer = async (req, res) => {
   try {
-    const reservations = await Reservation.find({ buyerId: req.user.id })
-      .populate('productId', 'name category pickupAddress discountedPrice availabilityDeadline')
+    const reservations = await Reservation.find({
+      buyerId: req.user.id
+    })
+      .populate(
+        'productId',
+        'name category pickupAddress originalPrice discountedPrice availabilityDeadline'
+      )
       .populate('sellerId', 'name businessName address')
       .sort({ createdAt: -1 })
       .lean();
 
-    res.json({ success: true, reservations });
+    res.json({
+      success: true,
+      reservations
+    });
+
   } catch (err) {
     console.error('Get buyer reservations error:', err);
-    res.status(500).json({ success: false, message: 'Server error.' });
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error.'
+    });
   }
 };
 
+
+// GET SELLER RESERVATIONS
 exports.getReservationsBySeller = async (req, res) => {
   try {
-    const reservations = await Reservation.find({ sellerId: req.user.id })
-      .populate('productId', 'name category pickupAddress discountedPrice availableQuantity availabilityDeadline')
+    const reservations = await Reservation.find({
+      sellerId: req.user.id
+    })
+      .populate(
+        'productId',
+        'name category pickupAddress originalPrice discountedPrice availableQuantity availabilityDeadline'
+      )
       .populate('buyerId', 'name email')
       .sort({ createdAt: -1 })
       .lean();
 
-    res.json({ success: true, reservations });
+    res.json({
+      success: true,
+      reservations
+    });
+
   } catch (err) {
     console.error('Get seller reservations error:', err);
-    res.status(500).json({ success: false, message: 'Server error.' });
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error.'
+    });
   }
 };
 
+
+// UPDATE RESERVATION STATUS
 exports.updateReservationStatus = async (req, res) => {
   const session = await mongoose.startSession();
+
   session.startTransaction();
 
   try {
@@ -105,44 +172,72 @@ exports.updateReservationStatus = async (req, res) => {
     if (!status) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: 'Status is required.' });
+
+      return res.status(400).json({
+        success: false,
+        message: 'Status is required.'
+      });
     }
 
     const reservation = await Reservation.findById(id).session(session);
+
     if (!reservation) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ success: false, message: 'Reservation not found.' });
+
+      return res.status(404).json({
+        success: false,
+        message: 'Reservation not found.'
+      });
     }
 
-    const isSeller = reservation.sellerId.toString() === req.user.id.toString();
-    const isBuyer = reservation.buyerId.toString() === req.user.id.toString();
+    const isSeller =
+      reservation.sellerId.toString() === req.user.id.toString();
+
+    const isBuyer =
+      reservation.buyerId.toString() === req.user.id.toString();
 
     if (!isSeller && !isBuyer) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(403).json({ success: false, message: 'You are not authorized to modify this reservation.' });
+
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to modify this reservation.'
+      });
     }
 
     const currentStatus = reservation.status;
 
+    // ACCEPT RESERVATION
     if (status === 'accepted') {
+
       if (!isSeller) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(403).json({ success: false, message: 'Only the seller can accept reservations.' });
+
+        return res.status(403).json({
+          success: false,
+          message: 'Only the seller can accept reservations.'
+        });
       }
+
       if (currentStatus !== 'pending') {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: `Cannot accept a reservation that is already ${currentStatus}.` });
+
+        return res.status(400).json({
+          success: false,
+          message: `Cannot accept a reservation that is already ${currentStatus}.`
+        });
       }
 
-      // Atomically decrement stock — only if sufficient quantity available
       const updatedProduct = await Product.findOneAndUpdate(
         {
           _id: reservation.productId,
-          availableQuantity: { $gte: reservation.quantity },
+          availableQuantity: {
+            $gte: reservation.quantity
+          },
         },
         {
           $inc: {
@@ -150,56 +245,97 @@ exports.updateReservationStatus = async (req, res) => {
             reservedQuantity: reservation.quantity,
           },
         },
-        { new: true, session }
+        {
+          new: true,
+          session
+        }
       );
 
       if (!updatedProduct) {
         await session.abortTransaction();
         session.endSession();
+
         return res.status(400).json({
           success: false,
-          message: 'Insufficient stock to accept this reservation. The available quantity may have changed.',
+          message: 'Insufficient stock to accept this reservation. The available quantity may have changed.'
         });
       }
 
       reservation.status = 'accepted';
 
-    } else if (status === 'rejected') {
+    }
+
+    // REJECT RESERVATION
+    else if (status === 'rejected') {
+
       if (!isSeller) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(403).json({ success: false, message: 'Only the seller can reject reservations.' });
+
+        return res.status(403).json({
+          success: false,
+          message: 'Only the seller can reject reservations.'
+        });
       }
+
       if (currentStatus !== 'pending') {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: `Cannot reject a reservation that is already ${currentStatus}.` });
+
+        return res.status(400).json({
+          success: false,
+          message: `Cannot reject a reservation that is already ${currentStatus}.`
+        });
       }
+
       reservation.status = 'rejected';
 
-    } else if (status === 'cancelled') {
+    }
+
+    // CANCEL RESERVATION
+    else if (status === 'cancelled') {
+
       if (!isBuyer) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(403).json({ success: false, message: 'Only the buyer can cancel reservations.' });
+
+        return res.status(403).json({
+          success: false,
+          message: 'Only the buyer can cancel reservations.'
+        });
       }
+
       if (currentStatus === 'collected') {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: 'A collected reservation cannot be cancelled.' });
+
+        return res.status(400).json({
+          success: false,
+          message: 'A collected reservation cannot be cancelled.'
+        });
       }
+
       if (currentStatus === 'rejected') {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: 'This reservation has already been rejected.' });
+
+        return res.status(400).json({
+          success: false,
+          message: 'This reservation has already been rejected.'
+        });
       }
+
       if (!['pending', 'accepted'].includes(currentStatus)) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: `Cannot cancel a ${currentStatus} reservation.` });
+
+        return res.status(400).json({
+          success: false,
+          message: `Cannot cancel a ${currentStatus} reservation.`
+        });
       }
 
-      // If accepted, return the reserved stock
+      // Restore stock if reservation was accepted
       if (currentStatus === 'accepted') {
         await Product.findByIdAndUpdate(
           reservation.productId,
@@ -209,49 +345,86 @@ exports.updateReservationStatus = async (req, res) => {
               reservedQuantity: -reservation.quantity,
             },
           },
-          { session }
+          {
+            session
+          }
         );
       }
 
       reservation.status = 'cancelled';
 
-    } else if (status === 'collected') {
+    }
+
+    // MARK AS COLLECTED
+    else if (status === 'collected') {
+
       if (!isSeller) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(403).json({ success: false, message: 'Only the seller can mark orders as collected.' });
+
+        return res.status(403).json({
+          success: false,
+          message: 'Only the seller can mark orders as collected.'
+        });
       }
+
       if (currentStatus !== 'accepted') {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: 'Only accepted reservations can be marked as collected.' });
+
+        return res.status(400).json({
+          success: false,
+          message: 'Only accepted reservations can be marked as collected.'
+        });
       }
 
-      // Decrement reservedQuantity (stock was already decremented on accept)
       await Product.findByIdAndUpdate(
         reservation.productId,
-        { $inc: { reservedQuantity: -reservation.quantity } },
-        { session }
+        {
+          $inc: {
+            reservedQuantity: -reservation.quantity
+          }
+        },
+        {
+          session
+        }
       );
 
       reservation.status = 'collected';
       reservation.collectedAt = new Date();
 
-    } else {
+    }
+
+    // INVALID STATUS
+    else {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: 'Invalid status transition.' });
+
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status transition.'
+      });
     }
 
     await reservation.save({ session });
+
     await session.commitTransaction();
     session.endSession();
 
-    // Populate for response
+    // POPULATE RESPONSE
     await reservation.populate([
-      { path: 'productId', select: 'name category pickupAddress discountedPrice' },
-      { path: 'buyerId', select: 'name email' },
-      { path: 'sellerId', select: 'name businessName' },
+      {
+        path: 'productId',
+        select: 'name category pickupAddress originalPrice discountedPrice'
+      },
+      {
+        path: 'buyerId',
+        select: 'name email'
+      },
+      {
+        path: 'sellerId',
+        select: 'name businessName'
+      },
     ]);
 
     res.json({
@@ -259,12 +432,20 @@ exports.updateReservationStatus = async (req, res) => {
       message: `Reservation ${status} successfully.`,
       reservation,
     });
+
   } catch (err) {
+
     try {
       await session.abortTransaction();
     } catch (_) {}
+
     session.endSession();
+
     console.error('Update reservation status error:', err);
-    res.status(500).json({ success: false, message: 'Server error. Please try again.' });
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error. Please try again.'
+    });
   }
 };
